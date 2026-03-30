@@ -3,19 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QTimer, Qt
-from PySide6.QtGui import QAction, QCursor, QIcon
+from PySide6.QtGui import QCursor, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMenu,
     QPushButton,
     QSpinBox,
     QSystemTrayIcon,
     QVBoxLayout,
-    QWidget,
 )
 
 from settings_manager import SettingsManager
@@ -121,6 +120,16 @@ class TimerWindow(QFrame):
         hint.setObjectName("hintLabel")
         root.addWidget(hint)
 
+        footer = QHBoxLayout()
+        footer.addStretch()
+
+        self.quit_button = QPushButton("Quit")
+        self.quit_button.setObjectName("quitButton")
+        self.quit_button.clicked.connect(self._quit_application)
+        footer.addWidget(self.quit_button)
+
+        root.addLayout(footer)
+
         self.set_duration_minutes(self.duration_input.value(), persist=False)
 
     def _apply_style(self) -> None:
@@ -165,6 +174,10 @@ class TimerWindow(QFrame):
             QPushButton:checked {
                 background: #4f7cff;
                 border-color: #4f7cff;
+            }
+            QPushButton#quitButton {
+                padding: 6px 12px;
+                min-height: 14px;
             }
             QLineEdit, QSpinBox {
                 background: #111318;
@@ -229,6 +242,11 @@ class TimerWindow(QFrame):
         self.model.reset()
         self.refresh_ui()
 
+    def _quit_application(self) -> None:
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
     def refresh_ui(self) -> None:
         snapshot = self.model.snapshot()
         self.time_label.setText(format_seconds(snapshot.remaining_seconds))
@@ -257,7 +275,6 @@ class PauseTimerTrayApp:
         self.tray_icon = QSystemTrayIcon(self._load_icon(), self.app)
         self.tray_icon.setToolTip("Pause Timer")
         self.tray_icon.activated.connect(self._on_tray_activated)
-        self.tray_icon.setContextMenu(self._build_menu())
 
     @staticmethod
     def is_tray_available() -> bool:
@@ -269,36 +286,46 @@ class PauseTimerTrayApp:
             return QIcon(str(icon_path))
         return self.window.style().standardIcon(self.window.style().SP_ComputerIcon)
 
-    def _build_menu(self) -> QMenu:
-        menu = QMenu()
-        open_action = QAction("Abrir", menu)
-        open_action.triggered.connect(self.toggle_window)
-        quit_action = QAction("Salir", menu)
-        quit_action.triggered.connect(self.app.quit)
-        menu.addAction(open_action)
-        menu.addSeparator()
-        menu.addAction(quit_action)
-        return menu
-
     def show(self) -> None:
         self.tray_icon.show()
         self.refresh_timer.start()
 
-    def toggle_window(self) -> None:
-        if self.window.isVisible():
-            self.window.hide()
-            return
-
+    def open_window(self) -> None:
         self.window.refresh_ui()
         self._position_window()
         self.window.show()
         self.window.raise_()
         self.window.activateWindow()
 
+    def toggle_window(self) -> None:
+        if self.window.isVisible():
+            self.window.hide()
+            return
+        self.open_window()
+
     def _position_window(self) -> None:
-        cursor_pos = QCursor.pos()
-        x = max(16, cursor_pos.x() - self.window.width() // 2)
-        y = max(16, cursor_pos.y() + 18)
+        tray_geometry = self.tray_icon.geometry()
+        anchor_pos = (
+            tray_geometry.center() if tray_geometry.isValid() else QCursor.pos()
+        )
+        screen = QGuiApplication.screenAt(anchor_pos) or QGuiApplication.screenAt(
+            QCursor.pos()
+        )
+
+        if screen is None:
+            x = max(16, anchor_pos.x() - self.window.width() // 2)
+            y = max(16, anchor_pos.y() + 18)
+            self.window.move(QPoint(x, y))
+            return
+
+        available = screen.availableGeometry()
+        x = anchor_pos.x() - self.window.width() // 2
+        y = anchor_pos.y() + 18
+
+        x = max(available.left() + 16, x)
+        x = min(x, available.right() - self.window.width() - 16)
+        y = max(available.top() + 16, y)
+        y = min(y, available.bottom() - self.window.height() - 16)
         self.window.move(QPoint(x, y))
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
@@ -321,4 +348,3 @@ class PauseTimerTrayApp:
                 self.tray_icon.icon(),
                 5000,
             )
-
