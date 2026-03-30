@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QTimer, Qt
-from PySide6.QtGui import QCursor, QGuiApplication, QIcon
+from PySide6.QtGui import QCursor, QGuiApplication, QIcon, QScreen
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -27,6 +28,83 @@ PRESET_MINUTES = [5, 15, 25, 60]
 def format_seconds(total_seconds: int) -> str:
     minutes, seconds = divmod(max(0, total_seconds), 60)
     return f"{minutes:02d}:{seconds:02d}"
+
+
+class BreakReminderDialog(QDialog):
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Pause Timer")
+        self.setModal(True)
+        self.setWindowFlags(
+            Qt.Dialog | Qt.WindowStaysOnTopHint | Qt.CustomizeWindowHint
+        )
+        self.setObjectName("breakReminderDialog")
+        self.setMinimumSize(520, 280)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 28, 28, 28)
+        root.setSpacing(20)
+
+        self.message_label = QLabel("Es la hora de hacer una pausa")
+        self.message_label.setWordWrap(True)
+        self.message_label.setAlignment(Qt.AlignCenter)
+        self.message_label.setObjectName("breakReminderMessage")
+        root.addStretch()
+        root.addWidget(self.message_label)
+        root.addStretch()
+
+        actions = QHBoxLayout()
+        actions.addStretch()
+        ok_button = QPushButton("OK")
+        ok_button.setObjectName("breakReminderOkButton")
+        ok_button.clicked.connect(self.accept)
+        actions.addWidget(ok_button)
+        actions.addStretch()
+        root.addLayout(actions)
+
+        self.setStyleSheet(
+            """
+            QDialog#breakReminderDialog {
+                background: #17191d;
+                border: 1px solid #2a2f39;
+                border-radius: 22px;
+            }
+            QLabel#breakReminderMessage {
+                color: #eef2f8;
+                font-size: 30px;
+                font-weight: 700;
+                line-height: 1.3;
+            }
+            QPushButton#breakReminderOkButton {
+                background: #4f7cff;
+                color: #ffffff;
+                border: 1px solid #4f7cff;
+                border-radius: 12px;
+                padding: 10px 24px;
+                min-width: 110px;
+            }
+            QPushButton#breakReminderOkButton:hover {
+                background: #678eff;
+            }
+            QPushButton#breakReminderOkButton:pressed {
+                background: #3f68d8;
+            }
+            """
+        )
+
+    def show_message(self, message: str, screen=None) -> None:
+        self.message_label.setText(message)
+        self.adjustSize()
+
+        if screen is not None:
+            available = screen.availableGeometry()
+            x = available.left() + (available.width() - self.width()) // 2
+            y = available.top() + (available.height() - self.height()) // 2
+            self.move(QPoint(x, y))
+
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
 
 class TimerWindow(QFrame):
@@ -87,7 +165,7 @@ class TimerWindow(QFrame):
 
         message_label = QLabel("Mensaje final")
         self.message_input = QLineEdit()
-        self.message_input.setPlaceholderText("Haz una pausa")
+        self.message_input.setPlaceholderText("Es la hora de hacer una pausa")
         self.message_input.setText(self.settings.load_message())
         self.message_input.editingFinished.connect(self._persist_message)
 
@@ -219,7 +297,7 @@ class TimerWindow(QFrame):
         return self.duration_input.value()
 
     def final_message(self) -> str:
-        message = self.message_input.text().strip() or "Haz una pausa"
+        message = self.message_input.text().strip() or "Es la hora de hacer una pausa"
         return message
 
     def start_timer(self) -> None:
@@ -268,6 +346,7 @@ class PauseTimerTrayApp:
         self.settings = SettingsManager()
         self.model = TimerModel(self.settings.load_duration_minutes() * 60)
         self.window = TimerWindow(self.settings, self.model)
+        self.reminder_dialog = BreakReminderDialog()
         self.refresh_timer = QTimer()
         self.refresh_timer.setInterval(250)
         self.refresh_timer.timeout.connect(self._on_refresh_tick)
@@ -305,12 +384,7 @@ class PauseTimerTrayApp:
 
     def _position_window(self) -> None:
         tray_geometry = self.tray_icon.geometry()
-        anchor_pos = (
-            tray_geometry.center() if tray_geometry.isValid() else QCursor.pos()
-        )
-        screen = QGuiApplication.screenAt(anchor_pos) or QGuiApplication.screenAt(
-            QCursor.pos()
-        )
+        anchor_pos, screen = self._resolve_anchor_and_screen(tray_geometry)
 
         if screen is None:
             x = max(16, anchor_pos.x() - self.window.width() // 2)
@@ -328,6 +402,20 @@ class PauseTimerTrayApp:
         y = min(y, available.bottom() - self.window.height() - 16)
         self.window.move(QPoint(x, y))
 
+    def _resolve_anchor_and_screen(
+        self, tray_geometry=None
+    ) -> tuple[QPoint, QScreen | None]:
+        geometry = tray_geometry or self.tray_icon.geometry()
+        anchor_pos = geometry.center() if geometry.isValid() else QCursor.pos()
+        screen = QGuiApplication.screenAt(anchor_pos) or QGuiApplication.screenAt(
+            QCursor.pos()
+        )
+        return anchor_pos, screen
+
+    def _show_break_reminder(self, message: str) -> None:
+        _, screen = self._resolve_anchor_and_screen()
+        self.reminder_dialog.show_message(message, screen)
+
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason in {
             QSystemTrayIcon.Trigger,
@@ -342,6 +430,7 @@ class PauseTimerTrayApp:
         if finished_now:
             message = self.window.final_message()
             self.settings.save_message(message)
+            self._show_break_reminder(message)
             self.tray_icon.showMessage(
                 "Pause Timer",
                 message,

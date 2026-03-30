@@ -15,11 +15,11 @@ class SettingsManager:
         self._settings.setValue("timer/last_duration_minutes", max(1, minutes))
         self._settings.sync()
 
-    def load_message(self, default: str = "Haz una pausa") -> str:
+    def load_message(self, default: str = "Es la hora de hacer una pausa") -> str:
         value = self._settings.value("timer/final_message", default, type=str)
         return (value or default).strip() or default
 
     def save_message(self, message: str) -> None:
-        cleaned = (message or "").strip() or "Haz una pausa"
+        cleaned = (message or "").strip() or "Es la hora de hacer una pausa"
         self._settings.setValue("timer/final_message", cleaned)
         self._settings.sync()
