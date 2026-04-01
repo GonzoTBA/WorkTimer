@@ -5,8 +5,26 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from tray_app import PauseTimerTrayApp
 
 
+def _configure_macos_agent_app() -> None:
+    if sys.platform != "darwin":
+        return
+
+    try:
+        from AppKit import (
+            NSApplication,
+            NSApplicationActivationPolicyAccessory,
+        )
+    except ImportError:
+        return
+
+    NSApplication.sharedApplication().setActivationPolicy_(
+        NSApplicationActivationPolicyAccessory
+    )
+
+
 def main() -> int:
     app = QApplication(sys.argv)
+    _configure_macos_agent_app()
     app.setApplicationName("Pause Timer")
     app.setOrganizationName("WorkTimer")
     app.setQuitOnLastWindowClosed(False)
